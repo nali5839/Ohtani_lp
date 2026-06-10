@@ -308,7 +308,12 @@ const RECIPIENT = '0x87643cD2e3a6a8711AF8Be9BA7Ab1F1e2E85B78b';
 const USDC_CONTRACT = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'; // Native USDC on Polygon
 const USDC_AMOUNT = '1000000'; // 1 USDC = 1,000,000 (6 decimals)
 const POLYGON_CHAIN_ID = '0x89'; // 137
-const RPC_URL = 'https://polygon-rpc.com';
+const RPC_URLS = [
+  'https://polygon-bor-rpc.publicnode.com',
+  'https://rpc.ankr.com/polygon',
+  'https://polygon.llamarpc.com',
+  'https://polygon-rpc.com',
+];
 const PAID_KEY = 'ohtani_paid_wallets_v2';
 
 // ERC-20 transfer ABI (minimal)
@@ -365,7 +370,21 @@ async function ensurePolygon(){
   }
 }
 
-// ---- Check past USDC transfers on-chain via eth_getLogs ----
+// ---- RPC call with fallback ----
+async function rpcCall(method, params){
+  for(const url of RPC_URLS){
+    try {
+      const res = await fetch(url, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({jsonrpc:'2.0',id:1,method,params}),
+        signal: AbortSignal.timeout(4000)
+      });
+      const data = await res.json();
+      if(data.result !== undefined) return data.result;
+    } catch(e){ continue; }
+  }
+  return null;
+}
 async function checkPastPayment(from){
   try {
     // from address padded as topic
