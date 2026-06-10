@@ -472,6 +472,7 @@ async function sendUSDC(){
     addPaid(userAddress);
     document.getElementById('success-txhash').textContent = txHash;
     showStep('step-success');
+    setTimeout(() => unlockContent(), 2000);
 
   } catch(e){
     showStep('step-payment');
@@ -485,9 +486,9 @@ async function sendUSDC(){
 }
 
 // ---- Poll for tx receipt ----
-async function waitForReceipt(txHash, maxAttempts=60){
+async function waitForReceipt(txHash, maxAttempts=120){
   for(let i=0; i<maxAttempts; i++){
-    await new Promise(r=>setTimeout(r,3000));
+    await new Promise(r=>setTimeout(r,1000));
     try {
       const body = {jsonrpc:'2.0',id:1,method:'eth_getTransactionReceipt',params:[txHash]};
       const res = await fetch(RPC_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -495,7 +496,7 @@ async function waitForReceipt(txHash, maxAttempts=60){
       if(data.result && data.result.status === '0x1') return true;
       if(data.result && data.result.status === '0x0') throw new Error('トランザクションが失敗しました');
     } catch(e){ if(e.message.includes('失敗')) throw e; }
-    document.getElementById('verify-msg').textContent = `確認中... (${i+1}/${maxAttempts})`;
+    document.getElementById('verify-msg').textContent = `確認中... (${i+1}秒経過)`;
   }
   throw new Error('タイムアウト');
 }
