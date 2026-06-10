@@ -477,31 +477,69 @@ async function sendUSDC(){
     document.getElementById('verify-title').textContent = 'トランザクション送信中...';
     document.getElementById('verify-msg').textContent = 'MetaMaskで承認してください';
 
-    const txHash = await window._mmProvider.request({
-      method: 'eth_sendTransaction',
-      params:[{ from: userAddress, to: USDC_CONTRACT, data }]
-    });
+    // 現在のRECIPIENT残高を記録（着金検知の基準）
+    const balanceBefore = await getUSDCBalance(RECIPIENT);
 
-    document.getElementById('tx-hash-display').textContent = txHash;
+    // MetaMask承認（Gas Station経由のため返却txHashは信頼しない）
+    let txHash = '';
+    try {
+      txHash = await window._mmProvider.request({
+        method: 'eth_sendTransaction',
+        params:[{ from: userAddress, to: USDC_CONTRACT, data }]
+      });
+    } catch(e){
+      if(e.code === 4001){ setError('キャンセルされました。'); showStep('step-payment'); btn.disabled=false; return; }
+      // Gas Station系はここでエラーになることがある→ポーリング続行
+    }
+
+    if(txHash) document.getElementById('tx-hash-display').textContent = txHash;
     document.getElementById('verify-title').textContent = 'ブロック確認待ち...';
-    document.getElementById('verify-msg').textContent = 'Polygonネットワークで確認中 (約5〜30秒)';
+    document.getElementById('verify-msg').textContent = 'Polygonネットワークで着金確認中...';
 
-    // Poll for receipt
-    await waitForReceipt(txHash);
+    // 残高増加またはtxReceiptで確認
+    const confirmedHash = await pollForPayment(txHash, balanceBefore);
     addPaid(userAddress);
-    document.getElementById('success-txhash').textContent = txHash;
+    document.getElementById('success-txhash').textContent = confirmedHash || txHash;
     showStep('step-success');
     setTimeout(() => unlockContent(), 2000);
 
   } catch(e){
     showStep('step-payment');
     btn.disabled = false;
-    if(e.code === 4001){
-      setError('キャンセルされました。');
-    } else {
-      setError('エラー: '+e.message);
-    }
+    setError('エラー: '+e.message);
   }
+}
+
+// USDC残高取得 (balanceOf)
+async function getUSDCBalance(addr){
+  try {
+    const data = '0x70a08231' + addr.toLowerCase().replace('0x','').padStart(64,'0');
+    const result = await rpcCall('eth_call', [{ to: USDC_CONTRACT, data }, 'latest']);
+    return result ? BigInt(result) : 0n;
+  } catch(e){ return 0n; }
+}
+
+// 着金ポーリング：残高増加 OR txReceipt確認
+async function pollForPayment(txHash, balanceBefore, maxAttempts=90){
+  for(let i=0; i<maxAttempts; i++){
+    await new Promise(r=>setTimeout(r,2000));
+    document.getElementById('verify-msg').textContent = `着金確認中... (${(i+1)*2}秒経過)`;
+    try {
+      // 方法1: RECIPIENT残高が増えたか確認
+      const balanceNow = await getUSDCBalance(RECIPIENT);
+      if(balanceNow > balanceBefore) return txHash;
+
+      // 方法2: txHashがあればreceiptを確認
+      if(txHash){
+        const receipt = await rpcCall('eth_getTransactionReceipt', [txHash]);
+        if(receipt){
+          if(receipt.status === '0x0') throw new Error('トランザクションが失敗しました');
+          if(receipt.status === '0x1') return txHash;
+        }
+      }
+    } catch(e){ if(e.message.includes('失敗')) throw e; }
+  }
+  throw new Error('タイムアウト: 着金が確認できませんでした');
 }
 
 // ---- Poll for tx receipt ----
